@@ -14,9 +14,12 @@
       align-items: center;
       justify-content: center;
       background: #0f1117;
+      overflow-x: hidden;
     }
 
     .donut-box {
+      box-sizing: border-box;
+      max-width: 100vw;
       padding: 1.5rem 1.75rem;
       border: 1px solid #2f3648;
       border-radius: 12px;
@@ -27,11 +30,19 @@
     .donut-box pre {
       margin: 0;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      /* 80 columns must fit the viewport: 80 cols x 0.6em advance = 48em wide. */
-      font-size: clamp(4px, 1.8vw, 13px);
+      /* 80 columns at a 0.6em advance need 48em, so the size tracks the
+         viewport to keep the box inside even a 320px screen. */
+      font-size: clamp(3.5px, 1.55vw, 13px);
       line-height: 1.2;
       color: #ffcf8f;
       white-space: pre;
+    }
+
+    @media (max-width: 600px) {
+      .donut-box {
+        padding: 0.75rem;
+        border-radius: 8px;
+      }
     }
   </style>
 </head>
@@ -40,89 +51,43 @@
     <pre id="donut" role="img" aria-label="Spinning ASCII art donut"></pre>
   </div>
 
+  <script src="donut-renderer.js"></script>
   <script>
-    const WIDTH = 80;
-    const HEIGHT = 22;
-    const CENTER_COL = 40;
-    const CENTER_ROW = 12;
+    const output = document.getElementById("donut");
+    const stillMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const SPIN_A = 0.04;
+    const SPIN_B = 0.02;
+    const STILL_POSE = [1, 1];
 
-    // A character cell is about twice as tall as it is wide, so the vertical
-    // scale is halved to keep the donut round instead of stretched.
-    const X_SCALE = 30;
-    const Y_SCALE = 15;
-
-    const TUBE_RADIUS = 1;
-    const RING_RADIUS = 2;
-    const VIEWER_DISTANCE = 5;
-    const THETA_STEP = 0.07;
-    const PHI_STEP = 0.02;
-    const TWO_PI = Math.PI * 2;
-    const SHADES = ".,-~:;=!*#$@";
-
-    function renderFrame(angleA, angleB) {
-      const cosA = Math.cos(angleA);
-      const sinA = Math.sin(angleA);
-      const cosB = Math.cos(angleB);
-      const sinB = Math.sin(angleB);
-
-      const cells = new Array(WIDTH * HEIGHT).fill(" ");
-      const depth = new Float32Array(WIDTH * HEIGHT);
-
-      for (let theta = 0; theta < TWO_PI; theta += THETA_STEP) {
-        const cosTheta = Math.cos(theta);
-        const sinTheta = Math.sin(theta);
-        const tubeOffset = RING_RADIUS + TUBE_RADIUS * cosTheta;
-
-        for (let phi = 0; phi < TWO_PI; phi += PHI_STEP) {
-          const cosPhi = Math.cos(phi);
-          const sinPhi = Math.sin(phi);
-
-          const invZ = 1 / (sinPhi * tubeOffset * sinA + sinTheta * cosA + VIEWER_DISTANCE);
-          const tilt = sinPhi * tubeOffset * cosA - sinTheta * sinA;
-
-          const col = Math.trunc(CENTER_COL + X_SCALE * invZ * (cosPhi * tubeOffset * cosB - tilt * sinB));
-          const row = Math.trunc(CENTER_ROW + Y_SCALE * invZ * (cosPhi * tubeOffset * sinB + tilt * cosB));
-
-          if (col < 0 || col >= WIDTH || row < 0 || row >= HEIGHT) continue;
-
-          const cell = col + WIDTH * row;
-          if (invZ <= depth[cell]) continue;
-
-          const luminance = Math.trunc(8 * (
-            (sinTheta * sinA - sinPhi * cosTheta * cosA) * cosB
-            - sinPhi * cosTheta * sinA
-            - sinTheta * cosA
-            - cosPhi * cosTheta * sinB
-          ));
-
-          depth[cell] = invZ;
-          cells[cell] = SHADES[Math.min(Math.max(luminance, 0), SHADES.length - 1)];
-        }
-      }
-
-      let frame = "";
-      for (let row = 0; row < HEIGHT; row++) {
-        frame += cells.slice(row * WIDTH, (row + 1) * WIDTH).join("") + "\n";
-      }
-      return frame;
-    }
-
-    const screen = document.getElementById("donut");
     let angleA = 0;
     let angleB = 0;
+    let frameHandle = null;
 
-    function drawSpinningDonut() {
-      screen.textContent = renderFrame(angleA, angleB);
-      angleA += 0.04;
-      angleB += 0.02;
-      requestAnimationFrame(drawSpinningDonut);
+    function draw(a, b) {
+      output.textContent = DonutRenderer.renderDonutFrame(a, b).text;
     }
 
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      screen.textContent = renderFrame(1, 1);
-    } else {
-      drawSpinningDonut();
+    function spin() {
+      draw(angleA, angleB);
+      angleA += SPIN_A;
+      angleB += SPIN_B;
+      frameHandle = requestAnimationFrame(spin);
     }
+
+    function applyMotionPreference() {
+      if (stillMotion.matches) {
+        if (frameHandle !== null) {
+          cancelAnimationFrame(frameHandle);
+          frameHandle = null;
+        }
+        draw(...STILL_POSE);
+      } else if (frameHandle === null) {
+        spin();
+      }
+    }
+
+    stillMotion.addEventListener("change", applyMotionPreference);
+    applyMotionPreference();
   </script>
 </body>
 </html>
