@@ -2,9 +2,61 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Index of the static test pages in this repository.">
   <title>Loop test page</title>
+  <style>
+    :root { color-scheme: dark; }
+
+    body {
+      margin: 0 auto;
+      max-width: 40rem;
+      padding: 2rem 1.25rem;
+      background: #0f1117;
+      color: #e6e8ef;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.5;
+    }
+
+    h1 {
+      margin: 0 0 0.5rem;
+      font-size: 1.75rem;
+    }
+
+    .intro {
+      margin: 0 0 1.5rem;
+      color: #a7adbe;
+    }
+
+    ul {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    li + li {
+      margin-top: 1rem;
+    }
+
+    a {
+      color: #ffcf8f;
+    }
+
+    li p {
+      margin: 0.25rem 0 0;
+      color: #a7adbe;
+    }
+  </style>
 </head>
 <body>
-    <a href="donut.html">Donut Page</a>
+  <h1>Loop test page</h1>
+  <p class="intro">Static, self-contained pages used to try out this repository's agent workflow.</p>
+
+  <ul>
+    <li>
+      <a href="donut.html">Donut Page</a>
+      <p>An ASCII art donut that spins in the browser, rendered without any external requests.</p>
+    </li>
+  </ul>
 </body>
 </html>
