@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Matrix rain: green glyphs falling down a black screen, turning white as they drop.">
+  <title>Matrix rain</title>
+  <style>
+    :root { color-scheme: dark; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #000;
+      overflow: hidden;
+    }
+
+    #rain {
+      position: fixed;
+      inset: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    nav {
+      position: relative;
+      padding: 1.5rem 1rem;
+    }
+
+    .back-link {
+      color: #ffcf8f;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      font-size: 1rem;
+      line-height: 1.5;
+      /* The rain runs behind the link, so the text carries its own backdrop. */
+      padding: 0.35rem 0.6rem;
+      border-radius: 6px;
+      background: rgb(0 0 0 / 0.75);
+    }
+  </style>
+</head>
+<body>
+  <canvas id="rain" role="img" aria-label="Green matrix glyphs falling down the screen and turning white as they drop"></canvas>
+  <nav><a class="back-link" href="index.html">&larr; Back to index</a></nav>
+
+  <script src="matrix-renderer.js"></script>
+  <script>
+    const canvas = document.getElementById("rain");
+    const context = canvas.getContext("2d");
+    const stillMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const FONT_STACK = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    // A background tab stops painting, so the first frame back can be seconds
+    // wide. Capping the step keeps the rain from teleporting down the screen.
+    const MAX_STEP = 0.1;
+    // Seconds of fall drawn as a still frame when motion is turned down.
+    const STILL_POSE = 3;
+
+    let metrics = null;
+    let rain = null;
+    let frameHandle = null;
+    let lastTime = null;
+
+    function measure() {
+      const width = Math.max(canvas.clientWidth, 1);
+      const height = Math.max(canvas.clientHeight, 1);
+      // Small enough to keep a phone screen busy, large enough to stay legible.
+      const fontSize = Math.min(Math.max(Math.round(width / 45), 12), 18);
+      const cellWidth = fontSize;
+      const cellHeight = Math.round(fontSize * 1.15);
+
+      return {
+        width, height, fontSize, cellWidth, cellHeight,
+        columns: Math.ceil(width / cellWidth),
+        rows: Math.ceil(height / cellHeight),
+      };
+    }
+
+    /** Resizes the canvas to the viewport. Returns true when the rain was rebuilt. */
+    function build() {
+      const next = measure();
+      const sameGrid = metrics !== null
+        && next.columns === metrics.columns
+        && next.rows === metrics.rows;
+      metrics = next;
+
+      // Draw in CSS pixels on a backing store sized for the display, so the
+      // glyphs stay sharp on a high-density screen.
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = Math.round(next.width * ratio);
+      canvas.height = Math.round(next.height * ratio);
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      context.font = next.fontSize + "px " + FONT_STACK;
+      context.textAlign = "center";
+      context.textBaseline = "top";
+
+      if (sameGrid && rain !== null) return false;
+
+      rain = MatrixRenderer.createRain({
+        columns: next.columns,
+        rows: next.rows,
+        random: Math.random,
+      });
+      return true;
+    }
+
+    function draw() {
+      context.globalAlpha = 1;
+      context.fillStyle = "#000";
+      context.fillRect(0, 0, metrics.width, metrics.height);
+
+      for (const cell of MatrixRenderer.frameCells(rain)) {
+        context.globalAlpha = cell.alpha;
+        context.fillStyle = cell.color;
+        context.fillText(
+          cell.glyph,
+          cell.column * metrics.cellWidth + metrics.cellWidth / 2,
+          cell.row * metrics.cellHeight,
+        );
+      }
+
+      context.globalAlpha = 1;
+    }
+
+    function step(time) {
+      const seconds = lastTime === null ? 0 : Math.min((time - lastTime) / 1000, MAX_STEP);
+      lastTime = time;
+      MatrixRenderer.advanceRain(rain, seconds);
+      draw();
+      frameHandle = requestAnimationFrame(step);
+    }
+
+    function stop() {
+      if (frameHandle !== null) {
+        cancelAnimationFrame(frameHandle);
+        frameHandle = null;
+      }
+      lastTime = null;
+    }
+
+    function applyMotionPreference() {
+      stop();
+      build();
+
+      if (stillMotion.matches) {
+        MatrixRenderer.advanceRain(rain, STILL_POSE);
+        draw();
+      } else {
+        frameHandle = requestAnimationFrame(step);
+      }
+    }
+
+    function handleResize() {
+      const rebuilt = build();
+      if (!stillMotion.matches) return;
+
+      // Resizing the canvas clears it, and the still frame has no loop to
+      // repaint it, so redraw here.
+      if (rebuilt) MatrixRenderer.advanceRain(rain, STILL_POSE);
+      draw();
+    }
+
+    window.addEventListener("resize", handleResize);
+    stillMotion.addEventListener("change", applyMotionPreference);
+    applyMotionPreference();
+  </script>
+</body>
+</html>
