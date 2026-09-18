@@ -20,11 +20,16 @@
     // roughly half that at 10, and down on the floor from 17 on.
     speedUp: 0.93,
     // How far a jump has to travel, as a share of the play area, so the
-    // target never reappears under the pointer that just clicked it.
+    // target never reappears under the pointer that just clicked it. Every
+    // jump clears this, whatever the generator answers.
     minJump: 0.35,
-    // Spots tried per jump; the farthest one wins if none clears minJump.
+    // Spots tried per jump before falling back to the far corner.
     jumpAttempts: 12,
   };
+
+  // The longest jump that can always be promised: from the middle of the play
+  // area, the corners are exactly this far off, and nothing is farther.
+  const MAX_JUMP = Math.SQRT1_2;
 
   function clamp(value, low, high) {
     return Math.min(Math.max(value, low), high);
