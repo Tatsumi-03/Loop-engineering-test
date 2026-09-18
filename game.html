@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Click the red circle as it teleports around the play area. It jumps sooner the higher your score climbs, and three misses end the round.">
+  <title>Teleporting target</title>
+  <style>
+    :root { color-scheme: dark; }
+
+    body {
+      margin: 0 auto;
+      max-width: 40rem;
+      padding: 1.5rem 1.25rem 2rem;
+      background: #0f1117;
+      color: #e6e8ef;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.5;
+    }
+
+    h1 {
+      margin: 1.5rem 0 0.5rem;
+      font-size: 1.75rem;
+    }
+
+    .back-link {
+      color: #ffcf8f;
+    }
+
+    .intro {
+      margin: 0 0 1rem;
+      color: #a7adbe;
+    }
+
+    .scoreboard {
+      display: flex;
+      gap: 1.5rem;
+      margin: 0 0 1rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .scoreboard span {
+      color: #a7adbe;
+    }
+
+    .scoreboard strong {
+      color: #e6e8ef;
+      font-size: 1.25rem;
+    }
+
+    .stage {
+      position: relative;
+      /* Tall enough for the jumps to be worth chasing, short enough that the
+         whole play area stays on screen next to the text above it. */
+      height: clamp(18rem, 60vh, 28rem);
+    }
+
+    .arena {
+      position: absolute;
+      inset: 0;
+      border: 1px solid #2f3648;
+      border-radius: 12px;
+      background: #161a24;
+      /* The target is placed against this box, and clicking the rest of it
+         counts as a miss, so nothing may spill outside. */
+      overflow: hidden;
+      touch-action: manipulation;
+    }
+
+    .target {
+      --target-size: clamp(2.75rem, 12vw, 3.5rem);
+      position: absolute;
+      width: var(--target-size);
+      height: var(--target-size);
+      padding: 0;
+      border: 0;
+      border-radius: 50%;
+      background: radial-gradient(circle at 32% 30%, #ff8a80, #e5231b 70%);
+      box-shadow: 0 0 18px rgb(229 35 27 / 0.55);
+      cursor: pointer;
+    }
+
+    .target:focus-visible {
+      outline: 3px solid #ffcf8f;
+      outline-offset: 3px;
+    }
+
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.75rem;
+      padding: 1.5rem;
+      box-sizing: border-box;
+      border-radius: 12px;
+      background: rgb(15 17 23 / 0.88);
+      text-align: center;
+    }
+
+    /* `display: flex` above outranks the browser's own rule for [hidden],
+       so hiding the panel between rounds has to be spelled out. */
+    .overlay[hidden] {
+      display: none;
+    }
+
+    .overlay h2 {
+      margin: 0;
+      font-size: 1.35rem;
+    }
+
+    .overlay p {
+      margin: 0;
+      color: #a7adbe;
+    }
+
+    .action {
+      padding: 0.6rem 1.4rem;
+      border: 1px solid #2f3648;
+      border-radius: 8px;
+      background: #ffcf8f;
+      color: #1a1205;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .action:focus-visible {
+      outline: 3px solid #ffcf8f;
+      outline-offset: 3px;
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      /* The jump itself stays instant; only the press reads as movement. */
+      .target { transition: transform 0.08s ease-out; }
+      .target:active { transform: scale(0.92); }
+    }
+  </style>
+</head>
+<body>
+  <nav><a class="back-link" href="index.html">&larr; Back to index</a></nav>
+
+  <main>
+    <h1>Teleporting target</h1>
+    <p class="intro">
+      Click the red circle. Every catch scores a point and brings the next jump
+      sooner. Three misses end the round, whether you click empty space or let
+      the circle get away.
+    </p>
+
+    <p class="scoreboard" role="status">
+      <span>Score <strong id="score">0</strong></span>
+      <span>Lives <strong id="lives">3</strong></span>
+    </p>
+
+    <div class="stage">
+      <div class="arena" id="arena">
+        <button class="target" id="target" type="button" aria-label="Red target" hidden></button>
+      </div>
+      <div class="overlay" id="overlay">
+        <h2 id="overlay-title">Ready?</h2>
+        <p id="overlay-text">Catch the circle before it teleports away.</p>
+        <button class="action" id="action" type="button">Start</button>
+      </div>
+    </div>
+  </main>
+
+  <script src="game-engine.js"></script>
+  <script>
+    const arena = document.getElementById("arena");
+    const target = document.getElementById("target");
+    const scoreValue = document.getElementById("score");
+    const livesValue = document.getElementById("lives");
+    const overlay = document.getElementById("overlay");
+    const overlayTitle = document.getElementById("overlay-title");
+    const overlayText = document.getElementById("overlay-text");
+    const actionButton = document.getElementById("action");
+
+    const game = GameEngine.createGame({ random: Math.random });
+
+    let jumpHandle = null;
+    let running = false;
+
+    function clearJump() {
+      if (jumpHandle !== null) {
+        clearTimeout(jumpHandle);
+        jumpHandle = null;
+      }
+    }
+
+    function scheduleJump(delay) {
+      clearJump();
+      jumpHandle = setTimeout(() => apply(GameEngine.registerMiss(game)), delay);
+    }
+
+    function paint(state) {
+      // The target's position is a fraction of the room it has to move in, so
+      // the circle stays whole inside the arena at any viewport width.
+      target.style.left = `calc(${state.target.x} * (100% - var(--target-size)))`;
+      target.style.top = `calc(${state.target.y} * (100% - var(--target-size)))`;
+      scoreValue.textContent = state.score;
+      livesValue.textContent = state.remaining;
+    }
+
+    function finish(state) {
+      running = false;
+      clearJump();
+      target.hidden = true;
+      overlayTitle.textContent = "Game over";
+      overlayText.textContent =
+        `Out of lives. You caught the circle ${state.score} ${state.score === 1 ? "time" : "times"}.`;
+      actionButton.textContent = "Play again";
+      overlay.hidden = false;
+      actionButton.focus();
+    }
+
+    function apply(state) {
+      paint(state);
+      if (state.over) finish(state);
+      else scheduleJump(state.delay);
+    }
+
+    function start() {
+      GameEngine.resetGame(game);
+      GameEngine.teleport(game);
+      overlay.hidden = true;
+      target.hidden = false;
+      running = true;
+      apply(GameEngine.snapshot(game));
+      target.focus();
+    }
+
+    arena.addEventListener("click", (event) => {
+      if (!running) return;
+      apply(event.target === target ? GameEngine.registerHit(game) : GameEngine.registerMiss(game));
+    });
+
+    actionButton.addEventListener("click", start);
+
+    // A hidden tab keeps firing timers, so a round left in another tab would
+    // run out its lives unwatched. Hold the clock until the page is back.
+    document.addEventListener("visibilitychange", () => {
+      if (!running) return;
+      if (document.hidden) clearJump();
+      else scheduleJump(GameEngine.snapshot(game).delay);
+    });
+
+    // The scoreboard reads its opening numbers off the engine, so the rules
+    // live in one place.
+    paint(GameEngine.snapshot(game));
+  </script>
+</body>
+</html>
