@@ -38,6 +38,8 @@
 
   // Angles the bounce may be configured down to and up to, in radians.
   const ANGLE_LIMITS = [0.05, 1.4];
+  // Straight runs one step of the ball is split into at the walls.
+  const MAX_SEGMENTS = 8;
 
   function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);
@@ -215,29 +217,58 @@
     return true;
   }
 
-  /** Flies the ball for `seconds`, off the walls, the paddles or out of play. */
+  /** Seconds until the ball meets the top or bottom wall; Infinity if never. */
+  function timeToWall(game) {
+    const { config, ball } = game;
+    if (ball.vy < 0) return (ball.radius - ball.y) / ball.vy;
+    if (ball.vy > 0) return (config.height - ball.radius - ball.y) / ball.vy;
+    return Infinity;
+  }
+
+  /**
+   * Flies the ball for `seconds`, off the walls, the paddles or out of play.
+   * The step is cut at each wall bounce so the paddles are always tested
+   * against the path the ball really took: a corner shot that reflects off a
+   * wall and reaches a paddle in the same step is two straight segments, not
+   * one that cuts the corner.
+   */
   function moveBall(game, seconds) {
     const { config, ball } = game;
-    const fromX = ball.x;
-    const fromY = ball.y;
+    let remaining = seconds;
 
-    ball.x += ball.vx * seconds;
-    ball.y += ball.vy * seconds;
+    // At the speeds the game reaches a step holds one bounce at most. The cap
+    // only stops an absurdly long step from spinning here.
+    for (let segment = 0; segment < MAX_SEGMENTS && remaining > 0; segment++) {
+      const wallTime = timeToWall(game);
+      const reachesWall = wallTime <= remaining;
+      const slice = Math.max(reachesWall ? wallTime : remaining, 0);
+      const fromX = ball.x;
+      const fromY = ball.y;
 
-    if (!bounceOffPaddle(game, game.player, 1, fromX, fromY)) {
-      bounceOffPaddle(game, game.rival, -1, fromX, fromY);
+      ball.x += ball.vx * slice;
+      ball.y += ball.vy * slice;
+      remaining -= slice;
+
+      const hit = bounceOffPaddle(game, game.player, 1, fromX, fromY)
+        || bounceOffPaddle(game, game.rival, -1, fromX, fromY);
+
+      if (ball.x + ball.radius < 0) {
+        scorePoint(game, "rival");
+        return;
+      }
+      if (ball.x - ball.radius > config.width) {
+        scorePoint(game, "player");
+        return;
+      }
+
+      // A paddle sent the ball somewhere else, so this segment's wall is no
+      // longer the one ahead of it.
+      if (hit) continue;
+      if (!reachesWall) return;
+
+      ball.y = ball.vy < 0 ? ball.radius : config.height - ball.radius;
+      ball.vy = -ball.vy;
     }
-
-    if (ball.y - ball.radius < 0) {
-      ball.y = ball.radius;
-      ball.vy = Math.abs(ball.vy);
-    } else if (ball.y + ball.radius > config.height) {
-      ball.y = config.height - ball.radius;
-      ball.vy = -Math.abs(ball.vy);
-    }
-
-    if (ball.x + ball.radius < 0) scorePoint(game, "rival");
-    else if (ball.x - ball.radius > config.width) scorePoint(game, "player");
   }
 
   /** Plays `seconds` of the game. A won game holds still until it is reset. */
