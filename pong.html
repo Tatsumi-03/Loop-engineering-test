@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Pong: a paddle each, a ball between them, first to eleven points.">
+  <title>Pong</title>
+  <style>
+    :root { color-scheme: dark; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      box-sizing: border-box;
+      padding: 1.5rem 1rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      background: #0f1117;
+      color: #e6e8ef;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.5;
+    }
+
+    .back-link {
+      color: #ffcf8f;
+      font-size: 1rem;
+    }
+
+    .field-box {
+      box-sizing: border-box;
+      width: 100%;
+      max-width: 44rem;
+      padding: 0.75rem;
+      border: 1px solid #2f3648;
+      border-radius: 12px;
+      background: #161a24;
+      box-shadow: 0 12px 40px rgb(0 0 0 / 0.45);
+    }
+
+    #field {
+      display: block;
+      width: 100%;
+      /* The field is 160 by 100 units, so the canvas keeps the same shape and
+         the drawing never has to letterbox. */
+      aspect-ratio: 8 / 5;
+      border-radius: 6px;
+      /* Dragging a finger across the field aims the paddle; it must not
+         scroll the page as well. */
+      touch-action: none;
+    }
+
+    .status,
+    .hint {
+      margin: 0;
+      max-width: 44rem;
+      text-align: center;
+    }
+
+    .hint {
+      color: #a7adbe;
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 600px) {
+      .field-box {
+        padding: 0.5rem;
+        border-radius: 8px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <nav><a class="back-link" href="index.html">&larr; Back to index</a></nav>
+
+  <div class="field-box">
+    <canvas id="field" role="img" aria-label="A Pong field: your paddle on the left, the rival's on the right, a ball between them"></canvas>
+  </div>
+
+  <p class="status" id="status" role="status"></p>
+  <p class="hint">Move with the mouse, a finger, the arrow keys or W and S. Space starts and pauses. First to eleven wins.</p>
+
+  <script src="pong-engine.js"></script>
+  <script>
+    const canvas = document.getElementById("field");
+    const context = canvas.getContext("2d");
+    const statusLine = document.getElementById("status");
+    const stillMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const FONT_STACK = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    // A background tab stops painting, so the first frame back can be seconds
+    // wide. Capping the step keeps the ball from crossing the field unseen.
+    const MAX_STEP = 0.05;
+    const COLORS = {
+      field: "#0b0e16",
+      line: "#2f3648",
+      score: "#8a94ad",
+      player: "#ffcf8f",
+      rival: "#8fb4ff",
+      ball: "#e6e8ef",
+      overlay: "rgb(11 14 22 / 0.8)",
+      message: "#e6e8ef",
+    };
+
+    const game = PongEngine.createGame();
+    // CSS pixels per field unit, plus the margin that centres the field when
+    // the canvas box is not exactly 8:5.
+    let view = { scale: 1, offsetX: 0, offsetY: 0, ratio: 1 };
+    const held = { up: false, down: false };
+    let running = false;
+    let frameHandle = null;
+    let lastTime = null;
+
+    function measure() {
+      const width = Math.max(canvas.clientWidth, 1);
+      const height = Math.max(canvas.clientHeight, 1);
+      const ratio = window.devicePixelRatio || 1;
+      const scale = Math.min(width / game.config.width, height / game.config.height);
+
+      canvas.width = Math.round(width * ratio);
+      canvas.height = Math.round(height * ratio);
+
+      view = {
+        scale,
+        ratio,
+        offsetX: (width - game.config.width * scale) / 2,
+        offsetY: (height - game.config.height * scale) / 2,
+      };
+    }
+
+    /** What to tell the player while the ball is not moving; null during play. */
+    function stateMessage() {
+      if (game.winner !== null) {
+        return game.winner === "player" ? "You win. Press space to play again." : "Rival wins. Press space to play again.";
+      }
+      if (!running) return "Press space or tap the field to play.";
+      return null;
+    }
+
+    function updateStatus() {
+      const message = stateMessage();
+      const reduced = message !== null && game.winner === null && stillMotion.matches
+        ? " Your system asks for reduced motion, so nothing moves until you start."
+        : "";
+      const text = "You " + game.score.player + ", rival " + game.score.rival + ". "
+        + (message === null ? "Playing." : message) + reduced;
+
+      // The status is a live region, so only touch it when the wording changes.
+      if (statusLine.textContent !== text) statusLine.textContent = text;
+    }
+
+    function draw() {
+      const { width, height, paddleWidth, paddleHeight } = game.config;
+
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      // From here on the drawing is in field units, on a backing store sized
+      // for the display so the edges stay sharp.
+      const unit = view.scale * view.ratio;
+      context.setTransform(unit, 0, 0, unit, view.offsetX * view.ratio, view.offsetY * view.ratio);
+
+      context.fillStyle = COLORS.field;
+      context.fillRect(0, 0, width, height);
+
+      context.fillStyle = COLORS.line;
+      for (let y = 1.5; y + 4 <= height; y += 7) {
+        context.fillRect(width / 2 - 0.4, y, 0.8, 4);
+      }
+
+      context.font = "12px " + FONT_STACK;
+      context.textBaseline = "top";
+      context.fillStyle = COLORS.score;
+      context.textAlign = "right";
+      context.fillText(String(game.score.player), width / 2 - 6, 6);
+      context.textAlign = "left";
+      context.fillText(String(game.score.rival), width / 2 + 6, 6);
+
+      context.fillStyle = COLORS.player;
+      context.fillRect(game.player.left, game.player.y - paddleHeight / 2, paddleWidth, paddleHeight);
+      context.fillStyle = COLORS.rival;
+      context.fillRect(game.rival.left, game.rival.y - paddleHeight / 2, paddleWidth, paddleHeight);
+
+      context.fillStyle = COLORS.ball;
+      context.beginPath();
+      context.arc(game.ball.x, game.ball.y, game.ball.radius, 0, Math.PI * 2);
+      context.fill();
+
+      const message = stateMessage();
+      if (message === null) return;
+
+      context.fillStyle = COLORS.overlay;
+      context.fillRect(0, height / 2 - 9, width, 18);
+      context.fillStyle = COLORS.message;
+      context.font = "7px " + FONT_STACK;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      // The last argument squeezes a long banner into a narrow field.
+      context.fillText(message, width / 2, height / 2, width - 8);
+    }
+
+    /** A held key aims past the edge of the field, so the paddle runs flat out. */
+    function applyHeldKeys() {
+      if (held.up === held.down) return;
+      PongEngine.aimPlayer(game, game.player.y + (held.up ? -game.config.height : game.config.height));
+    }
+
+    function step(time) {
+      const seconds = lastTime === null ? 0 : Math.min((time - lastTime) / 1000, MAX_STEP);
+      lastTime = time;
+
+      applyHeldKeys();
+      PongEngine.advanceGame(game, seconds);
+
+      if (game.winner !== null) {
+        stop();
+        return;
+      }
+
+      draw();
+      updateStatus();
+      frameHandle = requestAnimationFrame(step);
+    }
+
+    function stop() {
+      if (frameHandle !== null) {
+        cancelAnimationFrame(frameHandle);
+        frameHandle = null;
+      }
+      running = false;
+      lastTime = null;
+      draw();
+      updateStatus();
+    }
+
+    function start() {
+      if (running || game.winner !== null) return;
+      running = true;
+      lastTime = null;
+      frameHandle = requestAnimationFrame(step);
+      draw();
+      updateStatus();
+    }
+
+    /** Space and Enter: start, pause, or deal a new game once one is won. */
+    function togglePlay() {
+      if (game.winner !== null) {
+        PongEngine.resetGame(game);
+        start();
+      } else if (running) {
+        stop();
+      } else {
+        start();
+      }
+    }
+
+    function aimAtPointer(event) {
+      const bounds = canvas.getBoundingClientRect();
+      PongEngine.aimPlayer(game, (event.clientY - bounds.top - view.offsetY) / view.scale);
+    }
+
+    function handleResize() {
+      measure();
+      draw();
+    }
+
+    function keyDirection(key) {
+      if (key === "ArrowUp" || key === "w" || key === "W") return "up";
+      if (key === "ArrowDown" || key === "s" || key === "S") return "down";
+      return null;
+    }
+
+    canvas.addEventListener("pointerdown", (event) => {
+      // Keeps a touch from scrolling the page or selecting the text around it.
+      event.preventDefault();
+      aimAtPointer(event);
+      if (game.winner !== null) PongEngine.resetGame(game);
+      start();
+    });
+
+    canvas.addEventListener("pointermove", (event) => {
+      aimAtPointer(event);
+      // While play is stopped nothing repaints the field, so redraw here.
+      if (!running) draw();
+    });
+
+    window.addEventListener("keydown", (event) => {
+      // Leave the back link its own keys.
+      if (event.target instanceof Element && event.target.closest("a")) return;
+
+      if (event.key === " " || event.key === "Enter") {
+        event.preventDefault();
+        togglePlay();
+        return;
+      }
+
+      const direction = keyDirection(event.key);
+      if (direction === null) return;
+      event.preventDefault();
+      held[direction] = true;
+      start();
+    });
+
+    window.addEventListener("keyup", (event) => {
+      const direction = keyDirection(event.key);
+      if (direction !== null) held[direction] = false;
+    });
+
+    // A key held while the page loses focus would otherwise stick down.
+    window.addEventListener("blur", () => {
+      held.up = false;
+      held.down = false;
+    });
+
+    window.addEventListener("resize", handleResize);
+    // A game that started itself would animate against the preference, so the
+    // page opens stopped and pauses again whenever the preference turns on.
+    stillMotion.addEventListener("change", () => {
+      if (stillMotion.matches) stop();
+      else updateStatus();
+    });
+
+    measure();
+    draw();
+    updateStatus();
+  </script>
+</body>
+</html>
