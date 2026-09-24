@@ -21,6 +21,7 @@ Then visit `http://localhost:8000`.
 | `index.html` | Links to the other pages. |
 | `donut.html` | ASCII rotating donut, rendered by `donut-renderer.js`. |
 | `matrix.html` | Matrix-style character rain, rendered by `matrix-renderer.js`. |
+| `sakura.html` | Sakura rain: pink blossom glyphs falling past a tree on the right, rendered by `sakura-renderer.js`. |
 | `game.html` | Click the red target before it teleports; logic in `game-engine.js`. |
 
 The renderers and the game engine are kept in their own files so they can run
@@ -30,6 +31,7 @@ under Node without a browser.
 
 ```bash
 node verify-matrix.js
+node verify-sakura.js
 node verify-game.js
 ```
 
